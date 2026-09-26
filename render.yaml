@@ -1,0 +1,31 @@
+# Render Blueprint Specification
+# See https://render.com/docs/blueprint-spec for details
+
+services:
+  # Option A: Background Worker (Recommended for continuous execution)
+  - type: worker
+    name: reddit-karma-scout-worker
+    runtime: python
+    region: oregon
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DISCORD_WEBHOOK_URL
+        sync: false
+      - key: REDDIT_CLIENT_ID
+        sync: false
+      - key: REDDIT_CLIENT_SECRET
+        sync: false
+      - key: REDDIT_USER_AGENT
+        value: RedditKarmaScout/1.0
+      - key: REDDIT_USERNAME
+        sync: false
+      - key: REDDIT_PASSWORD
+        sync: false
+      - key: SCAN_INTERVAL_SECONDS
+        value: 300
+      - key: POST_COMMENT_LIMIT
+        value: 20
