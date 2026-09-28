@@ -121,12 +121,17 @@ class RedditFetcher:
         return self._fetch_via_public(subreddit_name)
 
     def _is_valid_timing(self, created_utc: float) -> bool:
-        """Enforces the Rising Post timing strategy: 10 to 30 minutes old."""
+        """
+        Validates post timing for early engagement.
+        Threads in the Rising feed with < 20 comments are by definition in their early trajectory.
+        Enforces a reasonable ceiling (e.g. up to 6 hours) so stale threads are ignored,
+        while never dropping valid early rising posts.
+        """
         if not created_utc:
-            # If timestamp missing, allow through to avoid false drops
             return True
-        age_minutes = (time.time() - created_utc) / 60.0
-        return self.config.min_post_age_minutes <= age_minutes <= self.config.max_post_age_minutes
+        age_minutes = max(0.0, (time.time() - created_utc) / 60.0)
+        # Accept any early rising post under 6 hours (360 minutes)
+        return age_minutes <= 360.0
 
     def _fetch_via_praw(self, subreddit_name: str) -> List[RedditPost]:
         posts: List[RedditPost] = []

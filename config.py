@@ -65,10 +65,11 @@ def load_config() -> Config:
     reddit_username = os.getenv("REDDIT_USERNAME", "").strip() or None
     reddit_password = os.getenv("REDDIT_PASSWORD", "").strip() or None
 
-    # Niche-aligned Communities: Python/Django backend, Quant/SMC trading, tech careers, local
+    # Balanced Communities: High-volume rising discussions + Niche tech & trading
     niche_communities = [
+        "AskReddit", "NoStupidQuestions", "CasualConversation",
         "Python", "django", "learnprogramming", "algotrading",
-        "cscareerquestions", "Forex", "Daytrading", "pakistan"
+        "cscareerquestions", "pakistan"
     ]
 
     tier_0 = niche_communities
