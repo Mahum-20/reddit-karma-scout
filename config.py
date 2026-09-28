@@ -66,8 +66,11 @@ def load_config() -> Config:
     reddit_password = os.getenv("REDDIT_PASSWORD", "").strip() or None
 
     # Default Karma Tiers as specified in requirements
-    tier_0 = ["AskReddit", "NoStupidQuestions", "CasualConversation", "memes", "aww"]
-    tier_1 = ["technology", "funny", "Showerthoughts", "explainlikeimfive"]
+    tier_0 = [
+        "AskReddit", "NoStupidQuestions", "CasualConversation",
+        "memes", "aww", "Showerthoughts", "explainlikeimfive"
+    ]
+    tier_1 = ["technology", "funny", "Showerthoughts", "explainlikeimfive", "todayilearned"]
     tier_2 = ["buildapc", "gaming", "popheads", "Discussion"]
 
     # Target subreddits override for public mode
@@ -78,10 +81,10 @@ def load_config() -> Config:
         target_subreddits = tier_0
 
     max_comments = int(os.getenv("POST_COMMENT_LIMIT", "20"))
-    min_post_age_minutes = int(os.getenv("MIN_POST_AGE_MINUTES", "10"))
-    max_post_age_minutes = int(os.getenv("MAX_POST_AGE_MINUTES", "30"))
+    min_post_age_minutes = int(os.getenv("MIN_POST_AGE_MINUTES", "5"))
+    max_post_age_minutes = int(os.getenv("MAX_POST_AGE_MINUTES", "45"))
     max_replies_per_hour = int(os.getenv("MAX_REPLIES_PER_HOUR", "10"))
-    scan_interval = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
+    scan_interval = int(os.getenv("SCAN_INTERVAL_SECONDS", "180"))
     db_path = os.getenv("DATABASE_PATH", "processed_posts.db").strip()
 
     return Config(

@@ -124,6 +124,14 @@ def main():
     logger.info(f"Hourly Reply Limit: {config.max_replies_per_hour} replies/hour max")
     logger.info(f"Mode: {'PRAW (API)' if config.praw_enabled else 'Public RSS/JSON'}")
 
+    # Send startup confirmation to Discord
+    notifier.send_startup_ping(
+        subreddits=config.target_subreddits,
+        min_age=config.min_post_age_minutes,
+        max_age=config.max_post_age_minutes,
+        max_hourly=config.max_replies_per_hour,
+    )
+
     iteration = 0
     while RUNNING:
         iteration += 1

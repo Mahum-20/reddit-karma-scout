@@ -22,6 +22,48 @@ class DiscordNotifier:
         self.webhook_url = config.discord_webhook_url
         self.session = requests.Session()
 
+    def send_startup_ping(self, subreddits: list, min_age: int, max_age: int, max_hourly: int) -> bool:
+        """Sends an immediate startup confirmation embed to Discord."""
+        if not self.webhook_url:
+            return False
+        subs_str = ", ".join([f"r/{s}" for s in subreddits[:5]])
+        embed = {
+            "title": "🟢 Reddit Karma Scout is Online!",
+            "description": "Scout successfully initialized on Render and is actively monitoring Reddit rising feeds.",
+            "color": 0x2ECC71,  # Green
+            "fields": [
+                {
+                    "name": "Target Communities",
+                    "value": f"`{subs_str}`",
+                    "inline": False,
+                },
+                {
+                    "name": "Timing Window",
+                    "value": f"`{min_age} to {max_age}m old`",
+                    "inline": True,
+                },
+                {
+                    "name": "Hourly Quota",
+                    "value": f"`Max {max_hourly}/hr`",
+                    "inline": True,
+                },
+                {
+                    "name": "Mode",
+                    "value": "`PRAW API`" if self.config.praw_enabled else "`Public Feed`",
+                    "inline": True,
+                },
+            ],
+            "footer": {
+                "text": "Status: Active • Alerts will arrive as matching threads qualify",
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            r = self.session.post(self.webhook_url, json={"username": "Karma Scout", "embeds": [embed]}, timeout=10)
+            return r.status_code in (200, 204)
+        except Exception:
+            return False
+
     def send_alert(
         self,
         post: RedditPost,
