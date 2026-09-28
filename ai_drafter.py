@@ -107,9 +107,13 @@ class AIDrafter:
                         return clean_draft
                 except Exception as e:
                     err_str = str(e)
-                    if "503" in err_str or "UNAVAILABLE" in err_str:
-                        logger.debug(f"Model {model_name} temporary 503 spike, retrying in 1.5s...")
-                        time.sleep(1.5)
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        logger.warning(f"Gemini API 5 RPM rate limit reached. Backing off for 12 seconds...")
+                        time.sleep(12)
+                        continue
+                    elif "503" in err_str or "UNAVAILABLE" in err_str:
+                        logger.debug(f"Model {model_name} temporary 503 spike, retrying in 2s...")
+                        time.sleep(2)
                         continue
                     elif "404" in err_str or "NOT_FOUND" in err_str:
                         logger.debug(f"Model {model_name} unavailable, moving to next model...")
@@ -118,11 +122,6 @@ class AIDrafter:
                         logger.error(f"Gemini API error generating draft ({model_name}): {e}")
                         break
 
-        # Practical fallbacks if API is temporarily unavailable
-        import random
-        fallbacks = [
-            "One pattern that helped me in production was moving the heavy serialization outside the request cycle and relying on indexed foreign keys. It keeps query latency consistent under load.",
-            "In automated structure models, filtering for candle body close rather than wick breaks usually eliminates most false BOS signals in low-liquidity sessions.",
-            "Building one complete, deployable API with proper logging, auth, and database migrations will teach you ten times more than following five different tutorial clones.",
-        ]
-        return random.choice(fallbacks)
+        # If API is exhausted, return None rather than sending irrelevant off-topic canned text
+        logger.warning(f"Could not generate custom comment for '{post_title[:40]}...'. Skipping to avoid irrelevant alerts.")
+        return None

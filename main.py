@@ -186,6 +186,10 @@ def main():
                         selftext=post.selftext,
                     )
 
+                    if not draft:
+                        logger.warning(f"Skipping alert for post {post.id} because custom draft generation was throttled.")
+                        continue
+
                     # Record reply to enforce hourly quota
                     storage.record_reply(post.id)
                     current_count = storage.get_hourly_reply_count()
@@ -205,11 +209,15 @@ def main():
                         title=post.title,
                     )
 
-                    # Polite rate-limit delay between notifications
-                    time.sleep(1.0)
+                    # Pacing delay between posts to respect Google Gemini free tier rate limits (5 RPM)
+                    time.sleep(6.0)
+
+                    # Cap at 2 posts per subreddit per cycle to prevent rate-limit flooding
+                    if new_posts_found >= 3:
+                        break
 
                 # Polite delay between subreddit requests to respect Reddit servers
-                time.sleep(2.0)
+                time.sleep(3.0)
 
             logger.info(f"Cycle #{iteration} complete. Flagged {new_posts_found} new posts.")
 
