@@ -65,20 +65,22 @@ def load_config() -> Config:
     reddit_username = os.getenv("REDDIT_USERNAME", "").strip() or None
     reddit_password = os.getenv("REDDIT_PASSWORD", "").strip() or None
 
-    # Default Karma Tiers as specified in requirements
-    tier_0 = [
-        "AskReddit", "NoStupidQuestions", "CasualConversation",
-        "memes", "aww", "Showerthoughts", "explainlikeimfive"
+    # Niche-aligned Communities: Python/Django backend, Quant/SMC trading, tech careers, local
+    niche_communities = [
+        "Python", "django", "learnprogramming", "algotrading",
+        "cscareerquestions", "Forex", "Daytrading", "pakistan"
     ]
-    tier_1 = ["technology", "funny", "Showerthoughts", "explainlikeimfive", "todayilearned"]
-    tier_2 = ["buildapc", "gaming", "popheads", "Discussion"]
+
+    tier_0 = niche_communities
+    tier_1 = niche_communities
+    tier_2 = niche_communities
 
     # Target subreddits override for public mode
     custom_subreddits = os.getenv("TARGET_SUBREDDITS", "").strip()
     if custom_subreddits:
         target_subreddits = [s.strip().replace("r/", "") for s in custom_subreddits.split(",") if s.strip()]
     else:
-        target_subreddits = tier_0
+        target_subreddits = niche_communities
 
     max_comments = int(os.getenv("POST_COMMENT_LIMIT", "20"))
     min_post_age_minutes = int(os.getenv("MIN_POST_AGE_MINUTES", "5"))
