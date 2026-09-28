@@ -9,6 +9,7 @@ import signal
 import logging
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import requests
 
 from config import load_config
 from storage import PostStorage
@@ -63,6 +64,37 @@ def start_health_server_if_needed():
         logger.warning(f"Failed to start healthcheck server on port {port_str}: {e}")
 
 
+def start_keep_alive_pinger_if_needed():
+    """
+    Render Free Web Services spin down after 15 minutes without incoming HTTP traffic.
+    This thread periodically pings the public Render URL to keep the container awake.
+    """
+    url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("KEEP_ALIVE_URL")
+    if not url:
+        logger.info("No RENDER_EXTERNAL_URL or KEEP_ALIVE_URL found. Self-pinger disabled (external monitor recommended).")
+        return
+
+    def pinger_loop():
+        logger.info(f"Keep-alive self-pinger active for: {url} (Interval: 10 minutes)")
+        # Wait 90 seconds after boot before sending first ping
+        time.sleep(90)
+        while RUNNING:
+            try:
+                resp = requests.get(url, timeout=15)
+                logger.info(f"Keep-alive ping sent to {url} (HTTP {resp.status_code})")
+            except Exception as e:
+                logger.debug(f"Keep-alive ping error: {e}")
+
+            # Sleep 10 minutes (600 seconds) - safely before Render's 15m timeout
+            elapsed = 0
+            while RUNNING and elapsed < 600:
+                time.sleep(5)
+                elapsed += 5
+
+    thread = threading.Thread(target=pinger_loop, daemon=True)
+    thread.start()
+
+
 def main():
     global RUNNING
 
@@ -76,6 +108,9 @@ def main():
 
     # Start healthcheck server if running on Render Web Service
     start_health_server_if_needed()
+
+    # Start keep-alive self-pinger to prevent Render spin-down
+    start_keep_alive_pinger_if_needed()
 
     config = load_config()
     storage = PostStorage(config.database_path)
