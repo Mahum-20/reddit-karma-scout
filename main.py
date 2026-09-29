@@ -143,32 +143,35 @@ def main():
             target_subreddits = fetcher.determine_target_subreddits()
             logger.info(f"Target Subreddits ({len(target_subreddits)}): {', '.join(target_subreddits)}")
 
-            new_posts_found = 0
-            for sub_name in target_subreddits:
-                if not RUNNING:
-                    break
+            # 1. Deliver 1 ready-to-post submission concept to Discord
+            sub_for_idea = target_subreddits[(iteration - 1) % len(target_subreddits)]
+            logger.info(f"Generating ready-to-post submission concept for r/{sub_for_idea}...")
+            post_idea = drafter.generate_original_post_idea(sub_for_idea)
+            if post_idea:
+                notifier.send_post_idea(sub_for_idea, post_idea)
+                logger.info(f"Delivered ready-to-post idea for r/{sub_for_idea} to Discord.")
+                time.sleep(5.0)
 
-                # Check if hourly quota has been hit
-                if not storage.can_generate_reply(config.max_replies_per_hour):
-                    logger.warning(
-                        f"Hourly reply quota reached ({config.max_replies_per_hour}/{config.max_replies_per_hour}). "
-                        f"Pausing new reply generation until the rolling hour resets."
-                    )
-                    break
+            # 2. Check comment quota and scan rising threads across target communities
+            if not storage.can_generate_reply(config.max_replies_per_hour):
+                logger.warning(
+                    f"Hourly reply quota reached ({config.max_replies_per_hour}/{config.max_replies_per_hour}). "
+                    f"Pausing comment alerts until the rolling hour resets."
+                )
+            else:
+                logger.info("Scanning rising threads across monitored communities...")
+                posts = fetcher.fetch_all_rising_posts(target_subreddits)
+                logger.info(f"Retrieved {len(posts)} candidate rising threads.")
 
-                logger.info(f"Scanning rising threads in r/{sub_name}...")
-                posts = fetcher.fetch_rising_posts(sub_name)
-
+                new_posts_found = 0
                 for post in posts:
                     if not RUNNING:
                         break
 
-                    # Check hourly quota again before each reply
                     if not storage.can_generate_reply(config.max_replies_per_hour):
                         logger.warning("Hourly quota reached during cycle. Stopping further generation.")
                         break
 
-                    # Skip already processed posts
                     if storage.is_processed(post.id):
                         continue
 
@@ -176,7 +179,7 @@ def main():
                     age_str = f"{post.age_minutes:.1f}m old" if post.created_utc else "Rising"
                     logger.info(
                         f"Found qualified rising thread in r/{post.subreddit}: "
-                        f"'{post.title[:50]}...' ({post.num_comments} comments, {age_str})"
+                        f"'{post.title[:50]}...' ({age_str})"
                     )
 
                     # Generate high-upvote AI comment draft
@@ -212,14 +215,11 @@ def main():
                     # Pacing delay between posts to respect Google Gemini free tier rate limits (5 RPM)
                     time.sleep(6.0)
 
-                    # Cap at 2 posts per subreddit per cycle to prevent rate-limit flooding
-                    if new_posts_found >= 3:
+                    # Cap at 2 comment alerts per cycle to prevent rate-limit flooding and keep quality high
+                    if new_posts_found >= 2:
                         break
 
-                # Polite delay between subreddit requests to respect Reddit servers
-                time.sleep(3.0)
-
-            logger.info(f"Cycle #{iteration} complete. Flagged {new_posts_found} new posts.")
+                logger.info(f"Cycle #{iteration} complete. Flagged {new_posts_found} new comment opportunities.")
 
             # Periodic cleanup of old database records
             if iteration % 20 == 0:

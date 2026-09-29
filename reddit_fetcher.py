@@ -47,11 +47,7 @@ class RedditFetcher:
         self.praw_instance = None
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/126.0.0.0 Safari/537.36"
-            )
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
         })
         self._init_praw()
 
@@ -118,24 +114,47 @@ class RedditFetcher:
             except Exception as e:
                 logger.warning(f"PRAW fetch failed for r/{subreddit_name}: {e}. Trying public fallback.")
 
-        return self._fetch_via_public(subreddit_name)
+        return self._fetch_rss_endpoint(subreddit_name)
+
+    def fetch_all_rising_posts(self, subreddit_names: List[str]) -> List[RedditPost]:
+        """
+        Fetches rising posts across all target communities.
+        Uses combined multi-subreddit requests to prevent triggering Reddit's IP rate limit.
+        """
+        if self.praw_instance:
+            try:
+                multi_sub = "+".join(subreddit_names)
+                return self._fetch_via_praw(multi_sub)
+            except Exception as e:
+                logger.warning(f"PRAW multi-sub fetch failed: {e}. Falling back to public feed.")
+
+        # Batch subreddits into multi-sub URLs of up to 5 communities per call
+        chunk_size = 5
+        all_posts: List[RedditPost] = []
+        for i in range(0, len(subreddit_names), chunk_size):
+            chunk = subreddit_names[i : i + chunk_size]
+            multi_target = "+".join(chunk)
+            posts = self._fetch_rss_endpoint(multi_target)
+            all_posts.extend(posts)
+            if i + chunk_size < len(subreddit_names):
+                time.sleep(12)  # Respect unauthenticated edge limits between batches
+
+        return all_posts
 
     def _is_valid_timing(self, created_utc: float) -> bool:
         """
         Validates post timing for early engagement.
-        Threads in the Rising feed with < 20 comments are by definition in their early trajectory.
-        Enforces a reasonable ceiling (e.g. up to 6 hours) so stale threads are ignored,
-        while never dropping valid early rising posts.
+        Threads in the Rising feed are in their high-velocity growth window.
+        Enforces a reasonable ceiling (e.g. up to 6 hours) so stale threads are ignored.
         """
         if not created_utc:
             return True
         age_minutes = max(0.0, (time.time() - created_utc) / 60.0)
-        # Accept any early rising post under 6 hours (360 minutes)
         return age_minutes <= 360.0
 
-    def _fetch_via_praw(self, subreddit_name: str) -> List[RedditPost]:
+    def _fetch_via_praw(self, subreddit_query: str) -> List[RedditPost]:
         posts: List[RedditPost] = []
-        subreddit = self.praw_instance.subreddit(subreddit_name)
+        subreddit = self.praw_instance.subreddit(subreddit_query)
         for submission in subreddit.rising(limit=25):
             if submission.stickied:
                 continue
@@ -144,18 +163,15 @@ class RedditFetcher:
 
             created_utc = getattr(submission, "created_utc", 0.0)
             if not self._is_valid_timing(created_utc):
-                age_m = (time.time() - created_utc) / 60.0 if created_utc else 0
-                logger.debug(
-                    f"Skipping post {submission.id} (age: {age_m:.1f}m - outside {self.config.min_post_age_minutes}-{self.config.max_post_age_minutes}m window)"
-                )
                 continue
 
             author_name = str(submission.author) if submission.author else "[deleted]"
+            sub_name = str(submission.subreddit)
             posts.append(
                 RedditPost(
                     id=submission.id,
                     title=submission.title,
-                    subreddit=subreddit_name,
+                    subreddit=sub_name,
                     permalink=submission.permalink,
                     author=author_name,
                     num_comments=submission.num_comments,
@@ -166,115 +182,98 @@ class RedditFetcher:
             )
         return posts
 
-    def _fetch_via_public(self, subreddit_name: str) -> List[RedditPost]:
-        """Fetches rising posts via public JSON endpoint with RSS fallback."""
-        json_url = f"https://www.reddit.com/r/{subreddit_name}/rising.json?limit=25"
-        try:
-            resp = self.session.get(json_url, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                children = data.get("data", {}).get("children", [])
-                posts: List[RedditPost] = []
-                for item in children:
-                    d = item.get("data", {})
-                    stickied = d.get("stickied", False)
-                    num_comments = d.get("num_comments", 0)
+    def _fetch_rss_endpoint(self, target_query: str) -> List[RedditPost]:
+        """
+        Fetches rising posts from Reddit's RSS feed (supports single sub or multi-sub).
+        Handles HTTP 429 by checking x-ratelimit-reset and backing off gracefully.
+        """
+        url = f"https://www.reddit.com/r/{target_query}/rising.rss"
+        max_attempts = 2
 
-                    if stickied or num_comments >= self.config.max_comments:
-                        continue
-
-                    post_id = d.get("id")
-                    if not post_id:
-                        continue
-
-                    created_utc = float(d.get("created_utc", 0.0))
-                    if not self._is_valid_timing(created_utc):
-                        age_m = (time.time() - created_utc) / 60.0 if created_utc else 0
-                        logger.debug(
-                            f"Skipping post {post_id} (age: {age_m:.1f}m - outside {self.config.min_post_age_minutes}-{self.config.max_post_age_minutes}m window)"
-                        )
-                        continue
-
-                    posts.append(
-                        RedditPost(
-                            id=post_id,
-                            title=d.get("title", ""),
-                            subreddit=subreddit_name,
-                            permalink=d.get("permalink", f"/r/{subreddit_name}/comments/{post_id}"),
-                            author=d.get("author", "[unknown]"),
-                            num_comments=num_comments,
-                            is_stickied=stickied,
-                            created_utc=created_utc,
-                            selftext=d.get("selftext", ""),
-                        )
+        for attempt in range(max_attempts):
+            try:
+                resp = self.session.get(url, timeout=12)
+                if resp.status_code == 200:
+                    return self._parse_rss_content(resp.content, default_sub=target_query)
+                elif resp.status_code == 429:
+                    reset_secs = int(resp.headers.get("x-ratelimit-reset", "12"))
+                    logger.warning(
+                        f"Reddit 429 rate limit hit for r/{target_query}. Waiting {reset_secs + 1}s..."
                     )
-                if posts:
-                    return posts
-            elif resp.status_code == 429:
-                logger.warning(f"Reddit rate-limited public JSON request (429) for r/{subreddit_name}.")
-            else:
-                logger.debug(f"Public JSON returned HTTP {resp.status_code} for r/{subreddit_name}.")
-        except Exception as e:
-            logger.debug(f"Public JSON error for r/{subreddit_name}: {e}")
+                    time.sleep(reset_secs + 1)
+                    continue
+                else:
+                    logger.debug(f"RSS endpoint {url} returned HTTP {resp.status_code}")
+                    break
+            except Exception as e:
+                logger.debug(f"Error fetching RSS from {url}: {e}")
+                time.sleep(2)
 
-        # 2. Try RSS feed fallback
-        return self._fetch_via_rss(subreddit_name)
+        return []
 
-    def _fetch_via_rss(self, subreddit_name: str) -> List[RedditPost]:
-        rss_url = f"https://www.reddit.com/r/{subreddit_name}/rising/.rss"
+    def _parse_rss_content(self, content: bytes, default_sub: str = "") -> List[RedditPost]:
         posts: List[RedditPost] = []
         try:
-            resp = self.session.get(rss_url, timeout=10)
-            if resp.status_code != 200:
-                logger.debug(f"Public RSS returned HTTP {resp.status_code} for r/{subreddit_name}.")
-                return []
-
-            root = ET.fromstring(resp.content)
-            namespace = {"atom": "http://www.w3.org/2005/Atom"}
-            entries = root.findall("atom:entry", namespace)
-
-            for entry in entries:
-                title_elem = entry.find("atom:title", namespace)
-                id_elem = entry.find("atom:id", namespace)
-                link_elem = entry.find("atom:link", namespace)
-                author_elem = entry.find("atom:author/atom:name", namespace)
-                updated_elem = entry.find("atom:updated", namespace) or entry.find("atom:published", namespace)
-
-                title = title_elem.text if title_elem is not None else ""
-                entry_id = id_elem.text if id_elem is not None else ""
-                link = link_elem.attrib.get("href", "") if link_elem is not None else ""
-                author = author_elem.text if author_elem is not None else "[unknown]"
-
-                created_utc = 0.0
-                if updated_elem is not None and updated_elem.text:
-                    try:
-                        dt = datetime.fromisoformat(updated_elem.text.replace("Z", "+00:00"))
-                        created_utc = dt.timestamp()
-                    except Exception:
-                        pass
-
-                clean_id = entry_id.split("_")[-1] if "_" in entry_id else entry_id
-
-                if not clean_id or not title:
-                    continue
-
-                if not self._is_valid_timing(created_utc):
-                    continue
-
-                posts.append(
-                    RedditPost(
-                        id=clean_id,
-                        title=title,
-                        subreddit=subreddit_name,
-                        permalink=link,
-                        author=author,
-                        num_comments=0,
-                        is_stickied=False,
-                        created_utc=created_utc,
-                        selftext="",
-                    )
-                )
+            root = ET.fromstring(content)
         except Exception as e:
-            logger.debug(f"Public RSS error for r/{subreddit_name}: {e}")
+            logger.debug(f"Failed to parse XML content: {e}")
+            return posts
+
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        entries = root.findall("atom:entry", ns)
+
+        for entry in entries:
+            title_elem = entry.find("atom:title", ns)
+            id_elem = entry.find("atom:id", ns)
+            link_elem = entry.find("atom:link", ns)
+            author_elem = entry.find("atom:author/atom:name", ns)
+            updated_elem = entry.find("atom:updated", ns) or entry.find("atom:published", ns)
+            cat_elem = entry.find("atom:category", ns)
+
+            title = title_elem.text if title_elem is not None and title_elem.text else ""
+            entry_id = id_elem.text if id_elem is not None and id_elem.text else ""
+            link = link_elem.attrib.get("href", "") if link_elem is not None else ""
+            author = author_elem.text if author_elem is not None and author_elem.text else "[unknown]"
+
+            # Extract specific subreddit name from atom:category
+            sub_name = default_sub
+            if cat_elem is not None:
+                term = cat_elem.attrib.get("term", "")
+                label = cat_elem.attrib.get("label", "")
+                if term:
+                    sub_name = term
+                elif label.startswith("r/"):
+                    sub_name = label[2:]
+
+            created_utc = 0.0
+            if updated_elem is not None and updated_elem.text:
+                try:
+                    dt = datetime.fromisoformat(updated_elem.text.replace("Z", "+00:00"))
+                    created_utc = dt.timestamp()
+                except Exception:
+                    pass
+
+            clean_id = entry_id.split("_")[-1] if "_" in entry_id else entry_id
+
+            if not clean_id or not title:
+                continue
+
+            if not self._is_valid_timing(created_utc):
+                continue
+
+            posts.append(
+                RedditPost(
+                    id=clean_id,
+                    title=title,
+                    subreddit=sub_name,
+                    permalink=link,
+                    author=author,
+                    num_comments=0,
+                    is_stickied=False,
+                    created_utc=created_utc,
+                    selftext="",
+                )
+            )
 
         return posts
+

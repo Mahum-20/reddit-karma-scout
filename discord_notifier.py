@@ -160,3 +160,89 @@ class DiscordNotifier:
                 time.sleep(1)
 
         return False
+
+    def send_post_idea(self, subreddit: str, post_idea: dict) -> bool:
+        """
+        Sends a ready-to-submit post concept to Discord.
+        Provides single-click copy blocks for Title and Body plus direct Reddit submit link.
+        """
+        if not self.webhook_url:
+            logger.info(
+                f"[DISCORD WEBHOOK NOT CONFIGURED] Post Idea for r/{subreddit}:\n"
+                f"  Title: {post_idea.get('title')}\n"
+                f"  Body: {post_idea.get('body')}\n"
+                f"  Strategy: {post_idea.get('strategy')}\n"
+            )
+            return False
+
+        title = post_idea.get("title", "").strip()
+        body = post_idea.get("body", "").strip()
+        strategy = post_idea.get("strategy", "High upvote discussion starter").strip()
+        submit_url = f"https://www.reddit.com/r/{subreddit}/submit"
+
+        fields = [
+            {
+                "name": "📌 Post Title (Click to Copy)",
+                "value": f"```{title}```",
+                "inline": False,
+            }
+        ]
+
+        if body:
+            fields.append({
+                "name": "📝 Post Body (Click to Copy)",
+                "value": f"```{body}```",
+                "inline": False,
+            })
+        else:
+            fields.append({
+                "name": "📝 Post Body",
+                "value": "*Title-only post (leave body empty on Reddit)*",
+                "inline": False,
+            })
+
+        fields.append({
+            "name": "🎯 Upvote Strategy",
+            "value": f"*{strategy}*",
+            "inline": False,
+        })
+
+        embed = {
+            "title": f"💡 Ready-to-Post Concept for r/{subreddit}",
+            "description": f"Submit this directly to **r/{subreddit}** to gain post karma & spark discussion.\n\n[➡️ **Click to Open Reddit Submit Page**]({submit_url})",
+            "url": submit_url,
+            "color": 0x9B59B6,  # Royal Purple
+            "fields": fields,
+            "footer": {
+                "text": "Reddit Karma Scout • Original Post Generator",
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        payload = {
+            "username": "Karma Scout",
+            "avatar_url": "https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png",
+            "embeds": [embed],
+        }
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = self.session.post(self.webhook_url, json=payload, timeout=10)
+                if response.status_code in (200, 204):
+                    logger.info(f"Discord post idea sent successfully for r/{subreddit}")
+                    return True
+                elif response.status_code == 429:
+                    retry_after = response.json().get("retry_after", 2)
+                    logger.warning(f"Discord rate limit hit. Waiting {retry_after}s...")
+                    time.sleep(float(retry_after))
+                else:
+                    logger.error(
+                        f"Discord webhook failed with HTTP {response.status_code}: {response.text}"
+                    )
+                    break
+            except Exception as e:
+                logger.error(f"Error posting post idea to Discord: {e}")
+                time.sleep(1)
+
+        return False

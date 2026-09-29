@@ -56,7 +56,7 @@ class Config:
 
 def load_config() -> Config:
     gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest").strip()
     discord_webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
 
     reddit_client_id = os.getenv("REDDIT_CLIENT_ID", "").strip() or None
@@ -67,8 +67,8 @@ def load_config() -> Config:
 
     # Balanced Communities: High-volume rising discussions + Niche tech & trading
     niche_communities = [
-        "AskReddit", "NoStupidQuestions", "CasualConversation",
-        "Python", "django", "learnprogramming", "algotrading",
+        "AskReddit", "NoStupidQuestions", "Showerthoughts", "CasualConversation",
+        "memes", "Python", "django", "learnprogramming", "algotrading",
         "cscareerquestions", "pakistan"
     ]
 

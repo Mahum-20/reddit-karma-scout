@@ -78,7 +78,7 @@ class AIDrafter:
         import time
         # Candidate models to try in order
         candidate_models = [self.config.gemini_model]
-        for fallback in ["gemini-flash-latest", "gemini-3.8-flash", "gemini-2.5-flash"]:
+        for fallback in ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-latest"]:
             if fallback not in candidate_models:
                 candidate_models.append(fallback)
 
@@ -124,4 +124,71 @@ class AIDrafter:
 
         # If API is exhausted, return None rather than sending irrelevant off-topic canned text
         logger.warning(f"Could not generate custom comment for '{post_title[:40]}...'. Skipping to avoid irrelevant alerts.")
+        return None
+
+    def generate_original_post_idea(self, subreddit: str) -> Optional[dict]:
+        """
+        Generates a viral, high-karma original post concept tailored to a specific community.
+        Returns a dict with {"title": ..., "body": ..., "strategy": ...}.
+        """
+        if not self.client:
+            return None
+
+        prompt = f"""
+        Generate ONE high-engagement, viral original post concept for r/{subreddit}.
+        The post must strictly adhere to the posting rules and subculture of r/{subreddit}.
+
+        Community rules:
+        - For r/AskReddit, r/Showerthoughts, r/NoStupidQuestions:
+          * "title": A brilliant, open-ended thought or question that triggers immediate curiosity and hundreds of answers.
+          * "body": Must be empty string "" because these communities forbid text in the post body (Rule 1).
+        - For technical & finance communities (r/Python, r/django, r/algotrading, r/learnprogramming, r/cscareerquestions):
+          * "title": A real-world architectural dilemma, optimization question, or relatable dev debate.
+          * "body": 2-3 sentences providing realistic production context and asking peers for their practical take.
+        - For discussion communities (r/CasualConversation, r/pakistan, r/memes):
+          * "title": Relatable, intriguing observation or open topic.
+          * "body": Short context or setup if appropriate, otherwise "".
+
+        Requirements:
+        1. "title": Authentic, conversational, attention-grabbing (NO AI buzzwords, NO clickbait).
+        2. "body": Context if allowed by the subreddit, otherwise empty string "".
+        3. "strategy": 1 concise sentence explaining why this angle drives massive upvotes and replies.
+
+        Output strictly valid JSON with keys: "title", "body", "strategy".
+        """.strip()
+
+        import json
+        import time
+
+        candidate_models = [self.config.gemini_model]
+        for fallback in ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-latest"]:
+            if fallback not in candidate_models:
+                candidate_models.append(fallback)
+
+        for model_name in candidate_models:
+            for attempt in range(2):
+                try:
+                    response = self.client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            temperature=0.9,
+                            max_output_tokens=600,
+                        ),
+                    )
+                    if response and response.text:
+                        data = json.loads(response.text.strip())
+                        if "title" in data and "body" in data:
+                            return data
+                except Exception as e:
+                    err_str = str(e)
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        time.sleep(10)
+                        continue
+                    elif "503" in err_str or "UNAVAILABLE" in err_str:
+                        time.sleep(2)
+                        continue
+                    break
+
         return None
